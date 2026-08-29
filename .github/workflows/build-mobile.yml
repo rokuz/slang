@@ -43,6 +43,8 @@ jobs:
         run: git remote add upstream https://github.com/shader-slang/slang.git
 
       - name: Build Slang for Android
+        env:
+          LDFLAGS: -Wl,-z,max-page-size=16384
         run: |
           export ANDROID_NDK_HOME="${ANDROID_NDK_HOME:-$ANDROID_NDK_LATEST_HOME}"
           echo "Android NDK: $ANDROID_NDK_HOME"
