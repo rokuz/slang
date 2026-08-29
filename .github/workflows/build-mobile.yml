@@ -1,0 +1,122 @@
+name: Build Mobile
+
+on:
+  workflow_dispatch:
+    inputs:
+      slang_ref:
+        description: 'Slang release tag to build (e.g. v2026.16)'
+        required: true
+        default: 'v2026.16'
+      build_android:
+        description: 'Build Android (arm64-v8a and x86_64)'
+        required: false
+        type: boolean
+        default: true
+      build_ios:
+        description: 'Build iOS device and simulator'
+        required: false
+        type: boolean
+        default: false
+
+jobs:
+  build-android:
+    name: build-android
+    if: ${{ inputs.build_android }}
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install build tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends ninja-build cmake
+
+      - name: Track upstream
+        run: git remote add upstream https://github.com/shader-slang/slang.git
+
+      - name: Build Slang for Android
+        run: |
+          export ANDROID_NDK_HOME="${ANDROID_NDK_HOME:-$ANDROID_NDK_LATEST_HOME}"
+          echo "Android NDK: $ANDROID_NDK_HOME"
+          python3 extras/build-mobile.py --tag "${{ inputs.slang_ref }}" --local=android
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: slang-android
+          path: build-mobile-staging/*.zip
+          if-no-files-found: error
+
+  build-ios:
+    name: build-ios
+    if: ${{ inputs.build_ios }}
+    runs-on: macos-latest
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install build tools
+        run: brew install ninja
+
+      - name: Track upstream
+        run: git remote add upstream https://github.com/shader-slang/slang.git
+
+      - name: Build Slang for iOS
+        run: python3 extras/build-mobile.py --tag "${{ inputs.slang_ref }}" --local=ios,ios-simulator
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: slang-ios
+          path: build-mobile-staging/*.zip
+          if-no-files-found: error
+
+  release:
+    name: Create release
+    needs: [build-android, build-ios]
+    if: ${{ always() && (needs.build-android.result == 'success' || needs.build-ios.result == 'success') }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Download artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          merge-multiple: true
+
+      - name: List artifacts
+        run: ls -la artifacts/
+
+      - name: Create release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ inputs.slang_ref }}-mobile
+          name: Slang ${{ inputs.slang_ref }} - Mobile
+          body: |
+            Mobile libraries built from upstream shader-slang/slang `${{ inputs.slang_ref }}` by `extras/build-mobile.py`.
+
+            | Platform | Architecture | Backend | Libraries |
+            |---|---|---|---|
+            | Android | arm64-v8a, x86_64 | SPIR-V | shared (`.so`) |
+            | iOS, iOS Simulator | arm64 | MSL | static (`.a`) |
+
+            Only the platforms selected in the workflow run are attached.
+          files: artifacts/*.zip
+          fail_on_unmatched_files: true
