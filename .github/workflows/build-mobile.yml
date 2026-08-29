@@ -60,7 +60,13 @@ jobs:
       - name: Check the 16 KB page alignment
         run: |
           readelf="$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-readelf"
-          for so in build-android-arm64-v8a/*.so; do
+          rm -rf alignment-check
+          for zip in build-mobile-staging/*android*.zip; do
+            unzip -q -o "$zip" -d alignment-check
+          done
+          found=0
+          for so in $(find alignment-check -name '*.so'); do
+            found=1
             align=$("$readelf" -l "$so" | awk '/LOAD/ {print $NF; exit}')
             echo "$so $align"
             if [ "$align" != "0x4000" ]; then
@@ -68,6 +74,10 @@ jobs:
               exit 1
             fi
           done
+          if [ "$found" != "1" ]; then
+            echo "::error::no shared libraries found in build-mobile-staging"
+            exit 1
+          fi
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
